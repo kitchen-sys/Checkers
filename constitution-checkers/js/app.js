@@ -84,6 +84,7 @@
     gameQuestionsWrong = 0;
     lastMove = null;
     pendingAmendment = null;
+    pendingStreakEffect = null;
 
     renderGameUI();
     showScreen("game");
@@ -115,6 +116,95 @@
         </div>
       </div>
     `;
+  }
+
+  // ── STREAK MILESTONES ────────────────────────────────────
+  const STREAK_MILESTONES = [
+    { at: 3, name: "Liberty Bell", icon: "\uD83D\uDD14", action: "recover" },
+    { at: 5, name: "Continental Congress", icon: "\u2696", action: "removeEnemy" },
+    { at: 7, name: "We The People", icon: "\uD83D\uDCDC", action: "kingAdvanced" },
+  ];
+  let pendingStreakEffect = null; // { action, position } — applied on Continue
+
+  function checkStreakMilestone(streak) {
+    if (streak < 3) return null;
+    const cyclePos = streak % 7;
+    return STREAK_MILESTONES.find(m => m.at % 7 === cyclePos) || null;
+  }
+
+  function findMostAdvancedPiece() {
+    let best = null;
+    for (let r = 0; r < 8; r++)
+      for (let c = 0; c < 8; c++)
+        if (engine.board[r][c] === PLAYER)
+          if (!best || r < best[0]) best = [r, c];
+    return best;
+  }
+
+  function applyStreakReward(milestone) {
+    pendingStreakEffect = null;
+    switch (milestone.action) {
+      case "recover":
+        if (engine.capturedByAI === 0) return null;
+        const pos = engine.recoverPiece();
+        if (pos) {
+          pendingStreakEffect = { action: "recover", position: pos };
+          return "Recovered a piece!";
+        }
+        return null;
+      case "removeEnemy":
+        const removed = engine.removeEnemyPiece();
+        if (removed) {
+          pendingStreakEffect = { action: "removeEnemy", position: removed };
+          return "Removed an enemy piece!";
+        }
+        return null;
+      case "kingAdvanced":
+        const target = findMostAdvancedPiece();
+        if (target) {
+          engine.forceKing(target[0], target[1]);
+          pendingStreakEffect = { action: "kingAdvanced", position: target };
+          return "Promoted a piece to King!";
+        }
+        return null;
+    }
+    return null;
+  }
+
+  function showStreakBanner(milestone) {
+    const banner = document.createElement("div");
+    banner.className = "streak-banner";
+    banner.innerHTML = `
+      <span class="streak-icon">${milestone.icon}</span>
+      <span class="streak-name">${milestone.name}</span>
+      <span class="streak-label">STREAK \u00D7${questionEngine.stats.streak}</span>
+    `;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 2200);
+  }
+
+  function playStreakEffect() {
+    if (!pendingStreakEffect) return;
+    const m = getBoardMetrics();
+    if (!m) return;
+    const [r, c] = pendingStreakEffect.position;
+
+    switch (pendingStreakEffect.action) {
+      case "recover": {
+        const cells = document.querySelectorAll("#board .cell");
+        const cell = cells[r * 8 + c];
+        const piece = cell && cell.querySelector(".piece");
+        if (piece) piece.classList.add("recover-glow");
+        break;
+      }
+      case "removeEnemy":
+        burstCapture(AI, m, r, c);
+        break;
+      case "kingAdvanced":
+        crownCeremony(m, r, c);
+        break;
+    }
+    pendingStreakEffect = null;
   }
 
   // ── ANIMATION SYSTEM ──────────────────────────────────────
@@ -442,7 +532,7 @@
         <span class="label">Correct</span>
         <span class="value green">${gameQuestionsCorrect}</span>
       </div>
-      <div class="stat-chip">
+      <div class="stat-chip${(questionEngine && questionEngine.stats.streak >= 3) ? ' streak-active' : ''}">
         <span class="label">Streak</span>
         <span class="value">${questionEngine ? questionEngine.stats.streak : 0}</span>
       </div>
@@ -623,6 +713,16 @@
         effectText = `+${xpGained} XP ◆ Bonus move granted!`;
       }
 
+      // Check streak milestone
+      const milestone = checkStreakMilestone(questionEngine.stats.streak);
+      if (milestone) {
+        const streakResult = applyStreakReward(milestone);
+        if (streakResult) {
+          effectText += ` \u25C6 ${milestone.name}: ${streakResult}`;
+        }
+        showStreakBanner(milestone);
+      }
+
       addXP(xpGained, progress);
       gameXPEarned += xpGained;
     } else {
@@ -658,6 +758,9 @@
       timeUntilQuestion = questionInterval;
       renderBoard();
       updateStatsBar();
+      if (pendingStreakEffect) {
+        setTimeout(playStreakEffect, 150);
+      }
       if (engine.gameOver) endGame();
     };
   }
