@@ -427,12 +427,18 @@
     if (!boardEl) return;
     boardEl.innerHTML = "";
 
-    const playerMoves = engine.currentTurn === PLAYER ? (() => {
+    let playerMoves = [];
+    let playerMustJump = false;
+    if (engine.currentTurn === PLAYER) {
       if (engine.multiJumpPiece) {
-        return engine.getJumpsForPiece(engine.multiJumpPiece[0], engine.multiJumpPiece[1]);
+        playerMoves = engine.getJumpsForPiece(engine.multiJumpPiece[0], engine.multiJumpPiece[1]);
+        playerMustJump = true;
+      } else {
+        const result = engine.getAllMoves(PLAYER);
+        playerMoves = result.moves;
+        playerMustJump = result.mustJump;
       }
-      return engine.getAllMoves(PLAYER).moves;
-    })() : [];
+    }
 
     const movablePieces = new Set(playerMoves.map(m => `${m.from[0]},${m.from[1]}`));
 
@@ -462,6 +468,8 @@
             pieceEl.onclick = (e) => { e.stopPropagation(); selectPiece(r, c); };
           }
           if (engine.multiJumpPiece && r === engine.multiJumpPiece[0] && c === engine.multiJumpPiece[1]) {
+            pieceEl.classList.add("force-jump");
+          } else if (playerMustJump && isPlayer && movablePieces.has(`${r},${c}`)) {
             pieceEl.classList.add("force-jump");
           }
           cell.appendChild(pieceEl);
@@ -968,8 +976,9 @@
   function endGame() {
     if (questionTimer) clearInterval(questionTimer);
 
+    const isDraw = engine.winner === null;
     const won = engine.winner === PLAYER;
-    let bonusXP = won ? XP_WIN_GAME : XP_LOSE_GAME;
+    let bonusXP = isDraw ? XP_LOSE_GAME : (won ? XP_WIN_GAME : XP_LOSE_GAME);
     if (gameQuestionsWrong === 0 && gameQuestionsCorrect > 0) bonusXP += XP_PERFECT_GAME;
     addXP(bonusXP, progress);
     gameXPEarned += bonusXP;
@@ -999,10 +1008,12 @@
     overlay.innerHTML = `
       <div class="question-modal">
         <div class="game-over-modal">
-          <h2>${won ? "Victory!" : "Defeat"}</h2>
-          <div class="result-text">${won
-            ? "The Constitution prevails! Your knowledge carried the day."
-            : "The opposition was too strong this time. Study the Articles and return."
+          <h2>${isDraw ? "Draw!" : (won ? "Victory!" : "Defeat")}</h2>
+          <div class="result-text">${isDraw
+            ? "Neither side could prevail. The debate continues another day."
+            : (won
+              ? "The Constitution prevails! Your knowledge carried the day."
+              : "The opposition was too strong this time. Study the Articles and return.")
           }</div>
           <div class="game-over-stats">
             <div class="game-over-stat">

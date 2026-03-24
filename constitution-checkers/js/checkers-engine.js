@@ -21,6 +21,7 @@ class CheckersEngine {
     this.gameOver = false;
     this.winner = null;
     this.moveCount = 0;
+    this.movesSinceCapture = 0;
     this.capturedByPlayer = 0;
     this.capturedByAI = 0;
     this.aiDepth = 3; // Base depth, adjusted by skill tree
@@ -52,6 +53,7 @@ class CheckersEngine {
     copy.capturedByPlayer = this.capturedByPlayer;
     copy.capturedByAI = this.capturedByAI;
     copy.moveCount = this.moveCount;
+    copy.movesSinceCapture = this.movesSinceCapture;
     copy.aiDepth = this.aiDepth;
     return copy;
   }
@@ -168,6 +170,11 @@ class CheckersEngine {
 
     this.multiJumpPiece = null;
     this.moveCount++;
+    if (move.captured) {
+      this.movesSinceCapture = 0;
+    } else {
+      this.movesSinceCapture++;
+    }
     this.currentTurn = side === PLAYER ? AI : PLAYER;
     this.checkGameOver();
     return { multiJump: false, from: move.from, to: move.to, captured: move.captured };
@@ -189,6 +196,9 @@ class CheckersEngine {
     } else if (aiPieces === 0 || aiMoves.moves.length === 0) {
       this.gameOver = true;
       this.winner = PLAYER;
+    } else if (this.movesSinceCapture >= 80) {
+      this.gameOver = true;
+      this.winner = null;
     }
   }
 
