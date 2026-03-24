@@ -22,6 +22,9 @@
   let gameQuestionsWrong = 0;
   let lastMove = null;
   let animating = false;
+  let preAIMoveSnapshot = null; // Engine clone from before last AI move
+  let lastAIMove = null;        // The move the AI chose (for judicial review veto)
+  let foundingVisionQuestion = null; // Previewed question for founding vision
 
   // ── INIT ───────────────────────────────────────────────────
   function init() {
@@ -85,12 +88,16 @@
     lastMove = null;
     pendingAmendment = null;
     pendingStreakEffect = null;
+    preAIMoveSnapshot = null;
+    lastAIMove = null;
+    foundingVisionQuestion = null;
 
     renderGameUI();
     showScreen("game");
     renderBoard();
     renderSidebar();
     startQuestionTimer();
+    showFoundingVisionPreview();
   }
 
   // ── GAME UI SCAFFOLD ───────────────────────────────────────
@@ -344,6 +351,8 @@
   function doBonusAIMoveAnimated() {
     setTimeout(async () => {
       if (engine.gameOver) return;
+      preAIMoveSnapshot = null; // Don't allow veto on penalty moves
+      lastAIMove = null;
       const move = engine.getAIMove();
       if (move) {
         const pt = engine.board[move.from[0]][move.from[1]];
@@ -453,6 +462,8 @@
     lastMove = { from: move.from, to: move.to };
     engine.selectedPiece = null;
     engine.validMoves = [];
+    preAIMoveSnapshot = null;
+    lastAIMove = null;
 
     const newType = engine.board[move.to[0]][move.to[1]];
     const becameKing = !engine.isKing(pieceType) && engine.isKing(newType);
@@ -488,7 +499,13 @@
       return;
     }
 
-    // Snapshot before execution
+    // Save state for Judicial Review (only on first move of chain)
+    if (!engine.multiJumpPiece) {
+      preAIMoveSnapshot = engine.clone();
+      lastAIMove = move;
+    }
+
+    // Snapshot before execution (for animation)
     const pieceType = engine.board[move.from[0]][move.from[1]];
     const capturedType = move.captured ? engine.board[move.captured[0]][move.captured[1]] : null;
 
@@ -562,9 +579,11 @@
     el.innerHTML = "";
 
     for (const [id, ability] of Object.entries(activeAbilities)) {
+      if (id === "amendment_power") continue; // Used from question modal, not ability bar
       const btn = document.createElement("button");
       btn.className = "ability-btn";
-      btn.disabled = ability.remaining <= 0 || engine.gameOver;
+      const contextDisabled = (id === "judicial_review" && !preAIMoveSnapshot);
+      btn.disabled = ability.remaining <= 0 || engine.gameOver || contextDisabled;
       btn.innerHTML = `${ability.icon} ${ability.name} <span class="uses">[${ability.remaining}]</span>`;
       btn.onclick = () => useAbility(id);
       el.appendChild(btn);
@@ -580,15 +599,51 @@
         // Passive — used automatically on wrong answer
         break;
       case "judicial_review":
-        if (engine.currentTurn === PLAYER && lastMove) {
-          // Can only use right after AI moved
-          // Undo isn't trivial in checkers, so we give AI a "worse" replacement move
+        if (engine.currentTurn === PLAYER && preAIMoveSnapshot && lastAIMove) {
           ability.remaining--;
-          const aiMove = engine.getAIMove();
-          // Just give player an extra move as compensation
-          engine.grantBonusMove();
-          showXPPopup("JUDICIAL REVIEW!");
-          renderBoard();
+
+          // Restore board state from before the AI moved
+          const snap = preAIMoveSnapshot;
+          engine.board = snap.board.map(row => [...row]);
+          engine.currentTurn = snap.currentTurn;
+          engine.capturedByPlayer = snap.capturedByPlayer;
+          engine.capturedByAI = snap.capturedByAI;
+          engine.moveCount = snap.moveCount;
+          engine.gameOver = snap.gameOver;
+          engine.winner = snap.winner;
+          engine.multiJumpPiece = null;
+          engine.selectedPiece = null;
+          engine.validMoves = [];
+
+          // Get all AI moves, filter out the vetoed one
+          const { moves: aiMoves } = engine.getAllMoves(AI);
+          const vetoed = lastAIMove;
+          const remaining = aiMoves.filter(m =>
+            !(m.from[0] === vetoed.from[0] && m.from[1] === vetoed.from[1] &&
+              m.to[0] === vetoed.to[0] && m.to[1] === vetoed.to[1])
+          );
+
+          if (remaining.length > 0) {
+            const altMove = remaining[Math.floor(Math.random() * remaining.length)];
+            const pt = engine.board[altMove.from[0]][altMove.from[1]];
+            const ct = altMove.captured ? engine.board[altMove.captured[0]][altMove.captured[1]] : null;
+            engine.executeMove(altMove);
+            lastMove = { from: altMove.from, to: altMove.to };
+            const nt = engine.board[altMove.to[0]][altMove.to[1]];
+            const kinged = !engine.isKing(pt) && engine.isKing(nt);
+            renderBoard();
+            showXPPopup("JUDICIAL REVIEW!");
+            animatePieceMove(altMove, pt, ct, kinged, ANIM_AI_MS);
+          } else {
+            // Only one legal move — AI skips turn
+            engine.currentTurn = PLAYER;
+            renderBoard();
+            showXPPopup("JUDICIAL REVIEW \u2014 AI BLOCKED!");
+          }
+
+          preAIMoveSnapshot = null;
+          lastAIMove = null;
+          if (engine.gameOver) endGame();
         }
         break;
       case "executive_order":
@@ -609,6 +664,36 @@
         break;
     }
     renderAbilities();
+  }
+
+  // ── FOUNDING VISION PREVIEW ──────────────────────────────
+  function showFoundingVisionPreview() {
+    if (!hasNode("founding_vision", progress)) return;
+
+    const difficulty = Math.min(3, 1 + Math.floor(progress.unlockedNodes.length / 2));
+    const q = questionEngine.getQuestion(difficulty);
+    foundingVisionQuestion = q;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay founding-vision-overlay";
+    overlay.innerHTML = `
+      <div class="founding-vision-modal">
+        <div class="fv-icon">\u2726</div>
+        <div class="fv-title">Founding Vision</div>
+        <div class="fv-article">${q.article}</div>
+        <div class="fv-question">${q.question}</div>
+        <div class="fv-hint">Your first challenge awaits...</div>
+        <div class="fv-dismiss">Click anywhere to begin</div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    const dismiss = () => {
+      overlay.style.animation = "fadeOut 0.3s ease forwards";
+      setTimeout(() => overlay.remove(), 300);
+    };
+    overlay.onclick = dismiss;
+    setTimeout(dismiss, 5000);
   }
 
   // ── QUESTION TIMER ─────────────────────────────────────────
@@ -636,8 +721,14 @@
 
   function triggerQuestion() {
     timerPaused = true;
-    const difficulty = Math.min(3, 1 + Math.floor(progress.unlockedNodes.length / 2));
-    const q = questionEngine.getQuestion(difficulty);
+    let q;
+    if (foundingVisionQuestion) {
+      q = foundingVisionQuestion;
+      foundingVisionQuestion = null;
+    } else {
+      const difficulty = Math.min(3, 1 + Math.floor(progress.unlockedNodes.length / 2));
+      q = questionEngine.getQuestion(difficulty);
+    }
     showQuestionModal(q);
   }
 
@@ -737,26 +828,69 @@
         activeAbilities.constitutional_shield.remaining--;
         effectText = "Constitutional Shield activated — penalty blocked!";
       } else if (activeAbilities.amendment_power && activeAbilities.amendment_power.remaining > 0) {
-        // Offer amendment power
-        effectText = "Wrong answer. The AI gains a bonus move.";
-        // Still apply penalty — amendment power would need to be used proactively
-        doBonusAIMoveAnimated();
+        // Defer penalty — player can choose to amend
+        effectText = "Wrong answer. The AI gains a bonus move... unless you Amend!";
+        pendingAmendment = { question };
       } else {
         effectText = "The AI gains a bonus move!";
         doBonusAIMoveAnimated();
       }
     }
 
+    const showAmendBtn = pendingAmendment !== null;
     resultArea.innerHTML = `
       <div class="result-display ${isCorrect ? "correct-result" : "wrong-result"}">
         <div class="result-label">${isCorrect ? "Correct!" : "Incorrect"}</div>
         <div class="result-explanation">${question.explanation}</div>
         <div class="result-effect">${effectText}</div>
+        ${showAmendBtn ? `<button class="amend-btn" id="btn-amend">\u2629 Amend Answer [1]</button>` : ""}
         <button class="continue-btn" id="btn-continue">Continue</button>
       </div>
     `;
 
+    if (showAmendBtn) {
+      overlay.querySelector("#btn-amend").onclick = () => {
+        activeAbilities.amendment_power.remaining--;
+
+        // Reverse wrong stats, apply correct stats
+        gameQuestionsWrong--;
+        gameQuestionsCorrect++;
+        questionEngine.stats.wrong--;
+        questionEngine.stats.correct++;
+        questionEngine.stats.streak = 1;
+        const art = pendingAmendment.question.article;
+        if (questionEngine.stats.byArticle[art]) {
+          questionEngine.stats.byArticle[art].wrong--;
+          questionEngine.stats.byArticle[art].correct++;
+        }
+
+        // Grant correct-answer reward
+        const xp = XP_CORRECT_ANSWER;
+        addXP(xp, progress);
+        gameXPEarned += xp;
+        engine.grantBonusMove();
+
+        // Update result display
+        const rd = resultArea.querySelector(".result-display");
+        rd.classList.remove("wrong-result");
+        rd.classList.add("correct-result", "amended-result");
+        resultArea.querySelector(".result-label").textContent = "Amended!";
+        resultArea.querySelector(".result-effect").textContent =
+          `\u2629 Amendment Power used! +${xp} XP \u25C6 Bonus move granted!`;
+        overlay.querySelector("#btn-amend").remove();
+
+        pendingAmendment = null;
+        showXPPopup("AMENDMENT POWER!");
+        renderAbilities();
+      };
+    }
+
     overlay.querySelector("#btn-continue").onclick = () => {
+      // If amendment was available but not used, apply penalty now
+      if (pendingAmendment) {
+        doBonusAIMoveAnimated();
+        pendingAmendment = null;
+      }
       overlay.remove();
       timerPaused = false;
       timeUntilQuestion = questionInterval;
