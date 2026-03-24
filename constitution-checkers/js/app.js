@@ -156,6 +156,10 @@
         const removed = engine.removeEnemyPiece();
         if (removed) {
           pendingStreakEffect = { action: "removeEnemy", position: removed };
+          if (engine.getPieceCount(AI) === 0) {
+            engine.gameOver = true;
+            engine.winner = PLAYER;
+          }
           return "Removed an enemy piece!";
         }
         return null;
