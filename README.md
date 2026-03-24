@@ -154,4 +154,4 @@ constitution-checkers/
 
 ## License
 
-This project does not currently include a license. All rights reserved by default.
+MIT — see [LICENSE](LICENSE).
