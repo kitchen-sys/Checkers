@@ -234,7 +234,11 @@ body::before {
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.piece:hover { transform: scale(1.08); }
+@media (hover: hover) {
+  .piece:hover { transform: scale(1.08); }
+}
+
+.piece:active { transform: scale(0.93); }
 
 .piece.player-piece {
   background: radial-gradient(circle at 35% 35%, #6ee7e0, #2a8a83 70%);
@@ -422,9 +426,16 @@ body::before {
   letter-spacing: 0.05em;
 }
 
-.ability-btn:hover:not(:disabled) {
-  background: rgba(168, 85, 247, 0.2);
-  box-shadow: 0 0 8px rgba(168, 85, 247, 0.3);
+@media (hover: hover) {
+  .ability-btn:hover:not(:disabled) {
+    background: rgba(168, 85, 247, 0.2);
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.3);
+  }
+}
+
+.ability-btn:active:not(:disabled) {
+  background: rgba(168, 85, 247, 0.25);
+  transform: scale(0.95);
 }
 
 .ability-btn:disabled {
@@ -530,9 +541,17 @@ body::before {
   min-width: 20px;
 }
 
-.choice-btn:hover:not(.answered) {
+@media (hover: hover) {
+  .choice-btn:hover:not(.answered) {
+    border-color: var(--neon-blue);
+    background: rgba(78, 205, 196, 0.08);
+  }
+}
+
+.choice-btn:active:not(.answered) {
   border-color: var(--neon-blue);
-  background: rgba(78, 205, 196, 0.08);
+  background: rgba(78, 205, 196, 0.14);
+  transform: scale(0.98);
 }
 
 .choice-btn.correct {
@@ -612,9 +631,16 @@ body::before {
   transition: all var(--transition-fast);
 }
 
-.result-display .continue-btn:hover {
-  background: rgba(240, 192, 64, 0.2);
-  box-shadow: var(--glow-gold);
+@media (hover: hover) {
+  .result-display .continue-btn:hover {
+    background: rgba(240, 192, 64, 0.2);
+    box-shadow: var(--glow-gold);
+  }
+}
+
+.result-display .continue-btn:active {
+  background: rgba(240, 192, 64, 0.25);
+  transform: scale(0.97);
 }
 
 /* ── TIMER BAR ───────────────────────────────────────────────── */
@@ -705,10 +731,17 @@ body::before {
   transition: all var(--transition-med);
 }
 
-.play-again-btn:hover {
-  background: rgba(240, 192, 64, 0.2);
-  box-shadow: var(--glow-gold);
-  transform: scale(1.03);
+@media (hover: hover) {
+  .play-again-btn:hover {
+    background: rgba(240, 192, 64, 0.2);
+    box-shadow: var(--glow-gold);
+    transform: scale(1.03);
+  }
+}
+
+.play-again-btn:active {
+  background: rgba(240, 192, 64, 0.25);
+  transform: scale(0.97);
 }
 
 /* ── TAB NAVIGATION ──────────────────────────────────────────── */
@@ -732,7 +765,11 @@ body::before {
   transition: all var(--transition-fast);
 }
 
-.tab-btn:hover { color: var(--text-secondary); }
+@media (hover: hover) {
+  .tab-btn:hover { color: var(--text-secondary); }
+}
+
+.tab-btn:active { color: var(--text-secondary); }
 
 .tab-btn.active {
   color: var(--neon-gold);
@@ -832,10 +869,17 @@ body::before {
   transition: all var(--transition-med);
 }
 
-.menu-btn:hover {
-  background: rgba(240, 192, 64, 0.18);
-  box-shadow: var(--glow-gold);
-  transform: translateY(-2px);
+@media (hover: hover) {
+  .menu-btn:hover {
+    background: rgba(240, 192, 64, 0.18);
+    box-shadow: var(--glow-gold);
+    transform: translateY(-2px);
+  }
+}
+
+.menu-btn:active {
+  background: rgba(240, 192, 64, 0.22);
+  transform: scale(0.97);
 }
 
 .menu-btn.secondary {
@@ -846,9 +890,16 @@ body::before {
   padding: 10px 24px;
 }
 
-.menu-btn.secondary:hover {
-  background: rgba(78, 205, 196, 0.15);
-  box-shadow: var(--glow-blue);
+@media (hover: hover) {
+  .menu-btn.secondary:hover {
+    background: rgba(78, 205, 196, 0.15);
+    box-shadow: var(--glow-blue);
+  }
+}
+
+.menu-btn.secondary:active {
+  background: rgba(78, 205, 196, 0.2);
+  transform: scale(0.97);
 }
 
 .menu-btn.danger {
@@ -1094,9 +1145,16 @@ body::before {
   animation: fadeIn 0.3s ease;
 }
 
-.amend-btn:hover {
-  background: rgba(168, 85, 247, 0.3);
-  box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
+@media (hover: hover) {
+  .amend-btn:hover {
+    background: rgba(168, 85, 247, 0.3);
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
+  }
+}
+
+.amend-btn:active {
+  background: rgba(168, 85, 247, 0.35);
+  transform: scale(0.97);
 }
 
 .result-display.amended-result {
@@ -1243,6 +1301,12 @@ body::before {
   0% { opacity: 0; transform: scale(0.3); }
   50% { opacity: 1; transform: scale(1.15); }
   100% { opacity: 1; transform: scale(1); }
+}
+
+/* ── MOBILE TOUCH ────────────────────────────────────────────── */
+button, .piece, .cell, .skill-node, .tab-btn {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 /* ── SCROLLBAR ───────────────────────────────────────────────── */
