@@ -1024,6 +1024,58 @@ body::before {
   100% { transform: scale(1.8); opacity: 0; }
 }
 
+/* ── FORCE JUMP INDICATOR ────────────────────────────────────── */
+.piece.force-jump {
+  box-shadow: 0 0 0 3px var(--neon-gold), 0 0 16px rgba(240, 192, 64, 0.6), 0 0 30px rgba(240, 192, 64, 0.3) !important;
+  animation: forceJumpPulse 0.8s ease-in-out infinite !important;
+}
+
+@keyframes forceJumpPulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--neon-gold), 0 0 16px rgba(240, 192, 64, 0.6); }
+  50% { box-shadow: 0 0 0 5px var(--neon-gold), 0 0 24px rgba(240, 192, 64, 0.8), 0 0 40px rgba(240, 192, 64, 0.3); }
+}
+
+/* ── RULES MODAL ────────────────────────────────────────────── */
+.rules-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rules-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.rules-icon {
+  min-width: 24px;
+  font-size: 1.1rem;
+  text-align: center;
+  color: var(--neon-blue);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.player-piece-dot {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #6ee7e0, #2a8a83 70%);
+  border: 1px solid var(--neon-blue);
+  margin-top: 3px;
+}
+
+.rules-begin-btn {
+  margin-top: 8px;
+  font-size: 0.9rem !important;
+  padding: 12px !important;
+}
+
 /* ── AMENDMENT POWER ─────────────────────────────────────────── */
 .amend-btn {
   margin-top: 8px;
