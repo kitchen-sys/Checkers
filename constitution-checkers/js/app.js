@@ -25,6 +25,7 @@
   let preAIMoveSnapshot = null; // Engine clone from before last AI move
   let lastAIMove = null;        // The move the AI chose (for judicial review veto)
   let foundingVisionQuestion = null; // Previewed question for founding vision
+  let pendingExecutiveOrder = false; // Waiting for player to pick a piece to king
 
   // ── INIT ───────────────────────────────────────────────────
   function init() {
@@ -91,6 +92,7 @@
     preAIMoveSnapshot = null;
     lastAIMove = null;
     foundingVisionQuestion = null;
+    pendingExecutiveOrder = false;
 
     renderGameUI();
     showScreen("game");
@@ -472,6 +474,10 @@
           } else if (playerMustJump && isPlayer && movablePieces.has(`${r},${c}`)) {
             pieceEl.classList.add("force-jump");
           }
+          if (pendingExecutiveOrder && piece === PLAYER) {
+            pieceEl.classList.add("selectable", "force-jump");
+            pieceEl.onclick = (e) => { e.stopPropagation(); completeExecutiveOrder(r, c); };
+          }
           cell.appendChild(pieceEl);
         }
 
@@ -496,7 +502,7 @@
 
   // ── PIECE SELECTION / MOVES ────────────────────────────────
   function selectPiece(r, c) {
-    if (engine.currentTurn !== PLAYER || engine.gameOver || timerPaused || animating) return;
+    if (engine.currentTurn !== PLAYER || engine.gameOver || timerPaused || animating || pendingExecutiveOrder) return;
     engine.selectedPiece = [r, c];
     engine.validMoves = engine.getMovesForPiece(r, c);
 
@@ -510,7 +516,7 @@
   }
 
   async function makeMove(r, c) {
-    if (engine.currentTurn !== PLAYER || engine.gameOver || animating) return;
+    if (engine.currentTurn !== PLAYER || engine.gameOver || animating || pendingExecutiveOrder) return;
     const move = engine.validMoves.find(m => m.to[0] === r && m.to[1] === c);
     if (!move) return;
 
@@ -639,7 +645,7 @@
     el.innerHTML = "";
 
     for (const [id, ability] of Object.entries(activeAbilities)) {
-      if (id === "amendment_power") continue; // Used from question modal, not ability bar
+      if (id === "amendment_power" || id === "constitutional_shield") continue;
       const btn = document.createElement("button");
       btn.className = "ability-btn";
       const contextDisabled = (id === "judicial_review" && !preAIMoveSnapshot);
@@ -648,6 +654,13 @@
       btn.onclick = () => useAbility(id);
       el.appendChild(btn);
     }
+
+    if (activeAbilities.constitutional_shield && activeAbilities.constitutional_shield.remaining > 0) {
+      const badge = document.createElement("span");
+      badge.className = "ability-badge";
+      badge.textContent = "\u2606 Shield Active";
+      el.appendChild(badge);
+    }
   }
 
   function useAbility(id) {
@@ -655,9 +668,6 @@
     if (!ability || ability.remaining <= 0) return;
 
     switch (id) {
-      case "constitutional_shield":
-        // Passive — used automatically on wrong answer
-        break;
       case "judicial_review":
         if (engine.currentTurn === PLAYER && preAIMoveSnapshot && lastAIMove) {
           ability.remaining--;
@@ -707,22 +717,25 @@
         }
         break;
       case "executive_order":
-        if (engine.currentTurn === PLAYER) {
-          // King the first non-king player piece found
-          for (let r = 0; r < 8; r++) {
-            for (let c = 0; c < 8; c++) {
-              if (engine.board[r][c] === PLAYER) {
-                engine.forceKing(r, c);
-                ability.remaining--;
-                showXPPopup("EXECUTIVE ORDER!");
-                renderBoard();
-                return;
-              }
-            }
-          }
+        if (engine.currentTurn === PLAYER && !pendingExecutiveOrder) {
+          pendingExecutiveOrder = true;
+          ability.remaining--;
+          showXPPopup("SELECT A PIECE TO KING");
+          renderBoard();
         }
         break;
     }
+    renderAbilities();
+  }
+
+  function completeExecutiveOrder(r, c) {
+    if (!pendingExecutiveOrder || engine.board[r][c] !== PLAYER) return;
+    engine.forceKing(r, c);
+    pendingExecutiveOrder = false;
+    showXPPopup("EXECUTIVE ORDER!");
+    const m = getBoardMetrics();
+    if (m) crownCeremony(m, r, c);
+    renderBoard();
     renderAbilities();
   }
 

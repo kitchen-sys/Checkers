@@ -448,6 +448,18 @@ body::before {
   margin-left: 4px;
 }
 
+.ability-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--neon-green);
+  background: rgba(46, 204, 113, 0.1);
+  color: var(--neon-green);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* ── QUESTION MODAL ──────────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
