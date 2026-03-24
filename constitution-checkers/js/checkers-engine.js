@@ -137,6 +137,22 @@ class CheckersEngine {
     return allMoves.filter(m => m.from[0] === r && m.from[1] === c);
   }
 
+  applyMoveWithChain(move, board) {
+    const newBoard = board.map(row => [...row]);
+    this.applyMove(move, newBoard);
+
+    if (!move.captured) return [newBoard];
+
+    const furtherJumps = this.getJumpsForPiece(move.to[0], move.to[1], newBoard);
+    if (furtherJumps.length === 0) return [newBoard];
+
+    const results = [];
+    for (const jump of furtherJumps) {
+      results.push(...this.applyMoveWithChain(jump, newBoard));
+    }
+    return results;
+  }
+
   applyMove(move, board = this.board) {
     const [fr, fc] = move.from;
     const [tr, tc] = move.to;
@@ -245,28 +261,32 @@ class CheckersEngine {
     if (maximizing) {
       let maxScore = -Infinity;
       for (const move of moves) {
-        const newBoard = board.map(row => [...row]);
-        this.applyMove(move, newBoard);
-        const result = this.minimax(newBoard, depth - 1, alpha, beta, false);
-        if (result.score > maxScore) {
-          maxScore = result.score;
-          bestMove = move;
+        const boards = this.applyMoveWithChain(move, board);
+        for (const newBoard of boards) {
+          const result = this.minimax(newBoard, depth - 1, alpha, beta, false);
+          if (result.score > maxScore) {
+            maxScore = result.score;
+            bestMove = move;
+          }
+          alpha = Math.max(alpha, maxScore);
+          if (beta <= alpha) break;
         }
-        alpha = Math.max(alpha, maxScore);
         if (beta <= alpha) break;
       }
       return { score: maxScore, move: bestMove };
     } else {
       let minScore = Infinity;
       for (const move of moves) {
-        const newBoard = board.map(row => [...row]);
-        this.applyMove(move, newBoard);
-        const result = this.minimax(newBoard, depth - 1, alpha, beta, true);
-        if (result.score < minScore) {
-          minScore = result.score;
-          bestMove = move;
+        const boards = this.applyMoveWithChain(move, board);
+        for (const newBoard of boards) {
+          const result = this.minimax(newBoard, depth - 1, alpha, beta, true);
+          if (result.score < minScore) {
+            minScore = result.score;
+            bestMove = move;
+          }
+          beta = Math.min(beta, minScore);
+          if (beta <= alpha) break;
         }
-        beta = Math.min(beta, minScore);
         if (beta <= alpha) break;
       }
       return { score: minScore, move: bestMove };
