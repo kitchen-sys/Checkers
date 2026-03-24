@@ -21,6 +21,7 @@
   let gameQuestionsCorrect = 0;
   let gameQuestionsWrong = 0;
   let lastMove = null;
+  let animating = false;
 
   // ── INIT ───────────────────────────────────────────────────
   function init() {
@@ -116,6 +117,158 @@
     `;
   }
 
+  // ── ANIMATION SYSTEM ──────────────────────────────────────
+  const ANIM_PLAYER_MS = 250;
+  const ANIM_AI_MS = 350;
+  const ANIM_JUMP_GAP = 150;
+
+  function getBoardMetrics() {
+    const b = document.getElementById("board");
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { rect: r, cell: r.width / 8 };
+  }
+
+  function cellXY(m, row, col) {
+    return {
+      x: m.rect.left + (col + 0.5) * m.cell,
+      y: m.rect.top  + (row + 0.5) * m.cell
+    };
+  }
+
+  function mkOverlay(type, m, row, col) {
+    const c = cellXY(m, row, col);
+    const sz = m.cell * 0.72;
+    const el = document.createElement("div");
+    const pl = type === PLAYER || type === PLAYER_KING;
+    const kg = type === PLAYER_KING || type === AI_KING;
+    el.className = `piece anim-piece ${pl ? "player-piece" : "ai-piece"}${kg ? " king" : ""}`;
+    Object.assign(el.style, {
+      position: "fixed", width: sz + "px", height: sz + "px",
+      left: (c.x - sz / 2) + "px", top: (c.y - sz / 2) + "px",
+      zIndex: "500", pointerEvents: "none", margin: "0", transition: "none"
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function slideOverlay(el, m, row, col, ms) {
+    return new Promise(resolve => {
+      const c = cellXY(m, row, col);
+      const sz = parseFloat(el.style.width);
+      void el.offsetHeight;
+      el.style.transition = `left ${ms}ms cubic-bezier(.23,1,.32,1), top ${ms}ms cubic-bezier(.23,1,.32,1)`;
+      el.style.left = (c.x - sz / 2) + "px";
+      el.style.top = (c.y - sz / 2) + "px";
+      setTimeout(() => { el.remove(); resolve(); }, ms);
+    });
+  }
+
+  function burstCapture(type, m, row, col) {
+    const c = cellXY(m, row, col);
+    const sz = m.cell * 0.72;
+    const pl = type === PLAYER || type === PLAYER_KING;
+
+    const ghost = mkOverlay(type, m, row, col);
+    ghost.classList.add("capture-burst");
+    setTimeout(() => ghost.remove(), 450);
+
+    const ring = document.createElement("div");
+    ring.className = `capture-ring ${pl ? "player-ring" : "ai-ring"}`;
+    Object.assign(ring.style, {
+      position: "fixed", width: sz + "px", height: sz + "px",
+      left: (c.x - sz / 2) + "px", top: (c.y - sz / 2) + "px",
+      zIndex: "499", pointerEvents: "none"
+    });
+    document.body.appendChild(ring);
+    setTimeout(() => ring.remove(), 500);
+
+    const color = pl ? "var(--neon-blue)" : "var(--neon-red)";
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const d = sz * 0.8 + Math.random() * sz * 0.5;
+      const p = document.createElement("div");
+      p.className = "capture-particle";
+      p.style.cssText = `left:${c.x}px;top:${c.y}px;background:${color};--tx:${Math.cos(a)*d}px;--ty:${Math.sin(a)*d}px;`;
+      document.body.appendChild(p);
+      setTimeout(() => p.remove(), 500);
+    }
+  }
+
+  function crownCeremony(m, row, col) {
+    const c = cellXY(m, row, col);
+    const sz = m.cell * 0.72;
+
+    const glow = document.createElement("div");
+    glow.className = "king-glow";
+    Object.assign(glow.style, {
+      position: "fixed", width: sz + "px", height: sz + "px",
+      left: (c.x - sz / 2) + "px", top: (c.y - sz / 2) + "px",
+      zIndex: "599", pointerEvents: "none"
+    });
+    document.body.appendChild(glow);
+    setTimeout(() => glow.remove(), 650);
+
+    const crown = document.createElement("div");
+    crown.className = "king-ceremony";
+    crown.textContent = "\u265B";
+    Object.assign(crown.style, {
+      position: "fixed", left: c.x + "px", top: (c.y - m.cell * 0.5) + "px", zIndex: "600"
+    });
+    document.body.appendChild(crown);
+    setTimeout(() => crown.remove(), 750);
+  }
+
+  async function animatePieceMove(move, pieceType, capturedType, becameKing, ms) {
+    const m = getBoardMetrics();
+    if (!m) return;
+    animating = true;
+
+    // Hide real piece at destination, animate overlay from source
+    const cells = document.querySelectorAll("#board .cell");
+    const dest = cells[move.to[0] * 8 + move.to[1]];
+    const realPiece = dest && dest.querySelector(".piece");
+    if (realPiece) realPiece.style.visibility = "hidden";
+
+    const overlay = mkOverlay(pieceType, m, move.from[0], move.from[1]);
+
+    if (move.captured && capturedType != null) {
+      setTimeout(() => burstCapture(capturedType, m, move.captured[0], move.captured[1]), ms * 0.35);
+    }
+
+    await slideOverlay(overlay, m, move.to[0], move.to[1], ms);
+    if (realPiece) realPiece.style.visibility = "";
+
+    if (becameKing) {
+      crownCeremony(m, move.to[0], move.to[1]);
+      await new Promise(r => setTimeout(r, 450));
+    }
+
+    animating = false;
+  }
+
+  function doBonusAIMoveAnimated() {
+    setTimeout(async () => {
+      if (engine.gameOver) return;
+      const move = engine.getAIMove();
+      if (move) {
+        const pt = engine.board[move.from[0]][move.from[1]];
+        const ct = move.captured ? engine.board[move.captured[0]][move.captured[1]] : null;
+        engine.executeMove(move);
+        lastMove = { from: move.from, to: move.to };
+        const nt = engine.board[move.to[0]][move.to[1]];
+        const kinged = !engine.isKing(pt) && engine.isKing(nt);
+        renderBoard();
+        const boardEl = document.getElementById("board");
+        if (boardEl) boardEl.classList.add("shake");
+        setTimeout(() => boardEl && boardEl.classList.remove("shake"), 400);
+        await animatePieceMove(move, pt, ct, kinged, ANIM_AI_MS);
+      }
+      renderBoard();
+      if (engine.gameOver) endGame();
+    }, 1500);
+  }
+
   // ── RENDER BOARD ───────────────────────────────────────────
   function renderBoard() {
     const boardEl = document.getElementById("board");
@@ -180,7 +333,7 @@
 
   // ── PIECE SELECTION / MOVES ────────────────────────────────
   function selectPiece(r, c) {
-    if (engine.currentTurn !== PLAYER || engine.gameOver || timerPaused) return;
+    if (engine.currentTurn !== PLAYER || engine.gameOver || timerPaused || animating) return;
     engine.selectedPiece = [r, c];
     engine.validMoves = engine.getMovesForPiece(r, c);
 
@@ -193,17 +346,25 @@
     renderBoard();
   }
 
-  function makeMove(r, c) {
-    if (engine.currentTurn !== PLAYER || engine.gameOver) return;
+  async function makeMove(r, c) {
+    if (engine.currentTurn !== PLAYER || engine.gameOver || animating) return;
     const move = engine.validMoves.find(m => m.to[0] === r && m.to[1] === c);
     if (!move) return;
+
+    // Snapshot before execution
+    const pieceType = engine.board[move.from[0]][move.from[1]];
+    const capturedType = move.captured ? engine.board[move.captured[0]][move.captured[1]] : null;
 
     const result = engine.executeMove(move);
     lastMove = { from: move.from, to: move.to };
     engine.selectedPiece = null;
     engine.validMoves = [];
 
+    const newType = engine.board[move.to[0]][move.to[1]];
+    const becameKing = !engine.isKing(pieceType) && engine.isKing(newType);
+
     renderBoard();
+    await animatePieceMove(move, pieceType, capturedType, becameKing, ANIM_PLAYER_MS);
 
     if (engine.gameOver) {
       endGame();
@@ -218,12 +379,12 @@
 
     // AI turn
     if (engine.currentTurn === AI) {
-      setTimeout(doAITurn, 400);
+      setTimeout(doAITurn, 200);
     }
   }
 
-  function doAITurn() {
-    if (engine.gameOver) return;
+  async function doAITurn() {
+    if (engine.gameOver || animating) return;
 
     const move = engine.getAIMove();
     if (!move) {
@@ -233,9 +394,18 @@
       return;
     }
 
+    // Snapshot before execution
+    const pieceType = engine.board[move.from[0]][move.from[1]];
+    const capturedType = move.captured ? engine.board[move.captured[0]][move.captured[1]] : null;
+
     const result = engine.executeMove(move);
     lastMove = { from: move.from, to: move.to };
+
+    const newType = engine.board[move.to[0]][move.to[1]];
+    const becameKing = !engine.isKing(pieceType) && engine.isKing(newType);
+
     renderBoard();
+    await animatePieceMove(move, pieceType, capturedType, becameKing, ANIM_AI_MS);
 
     if (engine.gameOver) {
       endGame();
@@ -244,7 +414,7 @@
 
     if (result.multiJump) {
       // AI continues multi-jump
-      setTimeout(doAITurn, 300);
+      setTimeout(doAITurn, ANIM_JUMP_GAP);
       return;
     }
 
@@ -466,32 +636,10 @@
         // Offer amendment power
         effectText = "Wrong answer. The AI gains a bonus move.";
         // Still apply penalty — amendment power would need to be used proactively
-        setTimeout(() => {
-          if (!engine.gameOver) {
-            const bonusMove = engine.grantAIBonusMove();
-            if (bonusMove) {
-              lastMove = { from: bonusMove.from, to: bonusMove.to };
-              const boardEl = document.getElementById("board");
-              if (boardEl) boardEl.classList.add("shake");
-              setTimeout(() => boardEl && boardEl.classList.remove("shake"), 400);
-            }
-            renderBoard();
-          }
-        }, 1500);
+        doBonusAIMoveAnimated();
       } else {
         effectText = "The AI gains a bonus move!";
-        setTimeout(() => {
-          if (!engine.gameOver) {
-            const bonusMove = engine.grantAIBonusMove();
-            if (bonusMove) {
-              lastMove = { from: bonusMove.from, to: bonusMove.to };
-              const boardEl = document.getElementById("board");
-              if (boardEl) boardEl.classList.add("shake");
-              setTimeout(() => boardEl && boardEl.classList.remove("shake"), 400);
-            }
-            renderBoard();
-          }
-        }, 1500);
+        doBonusAIMoveAnimated();
       }
     }
 
