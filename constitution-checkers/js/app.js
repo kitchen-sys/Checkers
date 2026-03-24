@@ -97,7 +97,56 @@
     renderBoard();
     renderSidebar();
     startQuestionTimer();
-    showFoundingVisionPreview();
+
+    if (progress.gamesPlayed === 0) {
+      showRulesModal();
+    } else {
+      showFoundingVisionPreview();
+    }
+  }
+
+  // ── RULES MODAL ─────────────────────────────────────────────
+  function showRulesModal() {
+    timerPaused = true;
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="question-modal rules-modal">
+        <div class="question-header">
+          <span class="q-label">How to Play</span>
+          <span class="q-article">Rules</span>
+        </div>
+        <div class="question-body rules-body">
+          <div class="rules-section">
+            <span class="rules-icon player-piece-dot"></span>
+            <div><strong>Move</strong> your <span style="color:var(--neon-blue)">teal pieces</span> diagonally forward, one square at a time.</div>
+          </div>
+          <div class="rules-section">
+            <span class="rules-icon">&#10005;</span>
+            <div><strong>Jump</strong> over <span style="color:var(--neon-red)">red pieces</span> to capture them. Jumps are <em>mandatory</em> \u2014 if you can jump, you must.</div>
+          </div>
+          <div class="rules-section">
+            <span class="rules-icon" style="color:var(--neon-gold)">&#10070;</span>
+            <div><strong>Multi-jump:</strong> If your piece can jump again after capturing, <span style="color:var(--neon-gold)">you must continue jumping</span>. A gold ring highlights the piece that must keep going.</div>
+          </div>
+          <div class="rules-section">
+            <span class="rules-icon">\u265B</span>
+            <div><strong>King</strong> a piece by reaching the far side of the board. Kings move diagonally in any direction.</div>
+          </div>
+          <div class="rules-section">
+            <span class="rules-icon" style="color:var(--neon-gold)">?</span>
+            <div>Every ~50 seconds, a <span style="color:var(--neon-gold)">Constitutional Challenge</span> appears. Answer correctly for a bonus; answer wrong and the AI gets an extra move.</div>
+          </div>
+          <button class="continue-btn rules-begin-btn" id="btn-rules-begin">Begin Game</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#btn-rules-begin").onclick = () => {
+      overlay.remove();
+      timerPaused = false;
+      showFoundingVisionPreview();
+    };
   }
 
   // ── GAME UI SCAFFOLD ───────────────────────────────────────
@@ -411,6 +460,9 @@
           if (isPlayer && engine.currentTurn === PLAYER && movablePieces.has(`${r},${c}`)) {
             pieceEl.classList.add("selectable");
             pieceEl.onclick = (e) => { e.stopPropagation(); selectPiece(r, c); };
+          }
+          if (engine.multiJumpPiece && r === engine.multiJumpPiece[0] && c === engine.multiJumpPiece[1]) {
+            pieceEl.classList.add("force-jump");
           }
           cell.appendChild(pieceEl);
         }
