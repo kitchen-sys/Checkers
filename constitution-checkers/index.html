@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Constitution Checkers</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖</text></svg>">
+</head>
+<body>
+
+  <!-- MENU SCREEN -->
+  <div class="screen active" id="screen-menu"></div>
+
+  <!-- GAME SCREEN -->
+  <div class="screen" id="screen-game"></div>
+
+  <!-- SKILL TREE SCREEN -->
+  <div class="screen" id="screen-tree"></div>
+
+  <!-- MASTERY SCREEN -->
+  <div class="screen" id="screen-mastery"></div>
+
+  <!-- Scripts — order matters -->
+  <script src="js/questions.js"></script>
+  <script src="js/checkers-engine.js"></script>
+  <script src="js/skill-tree.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,834 @@
+// ============================================================
+// CONSTITUTION CHECKERS — Main App Controller
+// Ties together: Engine, Questions, Skill Tree, UI
+// ============================================================
+
+(function () {
+  "use strict";
+
+  // ── STATE ──────────────────────────────────────────────────
+  let engine = null;
+  let questionEngine = null;
+  let progress = null;
+  let activeAbilities = {};
+  let questionTimer = null;
+  let questionInterval = 50; // seconds
+  let timeUntilQuestion = 50;
+  let timerPaused = false;
+  let currentScreen = "menu"; // menu | game | tree
+  let pendingAmendment = null; // For amendment power ability
+  let gameXPEarned = 0;
+  let gameQuestionsCorrect = 0;
+  let gameQuestionsWrong = 0;
+  let lastMove = null;
+
+  // ── INIT ───────────────────────────────────────────────────
+  function init() {
+    progress = loadProgress();
+    renderMenu();
+    showScreen("menu");
+  }
+
+  // ── SCREEN MANAGEMENT ─────────────────────────────────────
+  function showScreen(name) {
+    currentScreen = name;
+    document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+    const el = document.getElementById(`screen-${name}`);
+    if (el) el.classList.add("active");
+  }
+
+  // ── MENU SCREEN ────────────────────────────────────────────
+  function renderMenu() {
+    const el = document.getElementById("screen-menu");
+    const winRate = progress.gamesPlayed > 0
+      ? Math.round((progress.gamesWon / progress.gamesPlayed) * 100)
+      : 0;
+    el.innerHTML = `
+      <div class="menu-screen">
+        <div>
+          <div class="menu-title">Constitution<br>Checkers</div>
+          <div class="menu-subtitle">Learn the Articles ◆ Master the Board</div>
+        </div>
+        <div class="menu-stats">
+          <span>XP: <span class="ms-value">${progress.xp}</span></span>
+          <span>Games: <span class="ms-value">${progress.gamesPlayed}</span></span>
+          <span>Wins: <span class="ms-value">${progress.gamesWon}</span></span>
+          <span>Win Rate: <span class="ms-value">${winRate}%</span></span>
+        </div>
+        <button class="menu-btn" id="btn-play">Begin Session</button>
+        <button class="menu-btn secondary" id="btn-tree">Skill Tree</button>
+        <button class="menu-btn secondary" id="btn-mastery">Article Mastery</button>
+        <button class="menu-btn danger" id="btn-reset">Reset All Progress</button>
+      </div>
+    `;
+    document.getElementById("btn-play").onclick = startGame;
+    document.getElementById("btn-tree").onclick = () => { renderSkillTree(); showScreen("tree"); };
+    document.getElementById("btn-mastery").onclick = () => { renderMastery(); showScreen("mastery"); };
+    document.getElementById("btn-reset").onclick = () => {
+      if (confirm("Reset ALL progress? XP, skill tree, and stats will be wiped.")) {
+        progress = resetProgress();
+        renderMenu();
+      }
+    };
+  }
+
+  // ── START GAME ─────────────────────────────────────────────
+  function startGame() {
+    engine = new CheckersEngine();
+    questionEngine = new QuestionEngine();
+    activeAbilities = getActiveAbilities(progress);
+    engine.setDifficulty(progress.unlockedNodes.length);
+    gameXPEarned = 0;
+    gameQuestionsCorrect = 0;
+    gameQuestionsWrong = 0;
+    lastMove = null;
+    pendingAmendment = null;
+
+    renderGameUI();
+    showScreen("game");
+    renderBoard();
+    renderSidebar();
+    startQuestionTimer();
+  }
+
+  // ── GAME UI SCAFFOLD ───────────────────────────────────────
+  function renderGameUI() {
+    const el = document.getElementById("screen-game");
+    el.innerHTML = `
+      <div class="app-container">
+        <div class="app-header">
+          <h1>Constitution Checkers</h1>
+          <div class="subtitle">Knowledge is Power ◆ Power is Victory</div>
+        </div>
+        <div class="stats-bar" id="stats-bar"></div>
+        <div class="game-layout">
+          <div class="board-container">
+            <div class="turn-indicator player-turn" id="turn-indicator">Your Move</div>
+            <div class="checkerboard" id="board"></div>
+            <div class="timer-bar-container">
+              <div class="timer-bar-fill" id="timer-bar" style="width: 100%"></div>
+            </div>
+            <div class="abilities-bar" id="abilities-bar"></div>
+          </div>
+          <div class="sidebar" id="sidebar"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── RENDER BOARD ───────────────────────────────────────────
+  function renderBoard() {
+    const boardEl = document.getElementById("board");
+    if (!boardEl) return;
+    boardEl.innerHTML = "";
+
+    const playerMoves = engine.currentTurn === PLAYER ? (() => {
+      if (engine.multiJumpPiece) {
+        return engine.getJumpsForPiece(engine.multiJumpPiece[0], engine.multiJumpPiece[1]);
+      }
+      return engine.getAllMoves(PLAYER).moves;
+    })() : [];
+
+    const movablePieces = new Set(playerMoves.map(m => `${m.from[0]},${m.from[1]}`));
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const cell = document.createElement("div");
+        cell.className = `cell ${(r + c) % 2 === 0 ? "light" : "dark"}`;
+        cell.dataset.row = r;
+        cell.dataset.col = c;
+
+        if (lastMove) {
+          if ((r === lastMove.to[0] && c === lastMove.to[1]) ||
+              (r === lastMove.from[0] && c === lastMove.from[1])) {
+            cell.classList.add("last-move");
+          }
+        }
+
+        const piece = engine.board[r][c];
+        if (piece !== EMPTY) {
+          const pieceEl = document.createElement("div");
+          const isPlayer = engine.isPlayerPiece(piece);
+          pieceEl.className = `piece ${isPlayer ? "player-piece" : "ai-piece"}`;
+          if (engine.isKing(piece)) pieceEl.classList.add("king");
+
+          if (isPlayer && engine.currentTurn === PLAYER && movablePieces.has(`${r},${c}`)) {
+            pieceEl.classList.add("selectable");
+            pieceEl.onclick = (e) => { e.stopPropagation(); selectPiece(r, c); };
+          }
+          cell.appendChild(pieceEl);
+        }
+
+        // Show valid moves for selected piece
+        if (engine.selectedPiece) {
+          const isValidTarget = engine.validMoves.some(m => m.to[0] === r && m.to[1] === c);
+          if (isValidTarget) {
+            const isJump = engine.validMoves.some(m => m.to[0] === r && m.to[1] === c && m.captured);
+            cell.classList.add(isJump ? "valid-jump" : "valid-move");
+            cell.onclick = () => makeMove(r, c);
+          }
+        }
+
+        boardEl.appendChild(cell);
+      }
+    }
+
+    updateStatsBar();
+    updateTurnIndicator();
+    renderAbilities();
+  }
+
+  // ── PIECE SELECTION / MOVES ────────────────────────────────
+  function selectPiece(r, c) {
+    if (engine.currentTurn !== PLAYER || engine.gameOver || timerPaused) return;
+    engine.selectedPiece = [r, c];
+    engine.validMoves = engine.getMovesForPiece(r, c);
+
+    // Highlight selected cell
+    document.querySelectorAll(".cell").forEach(cell => cell.classList.remove("selected"));
+    const cells = document.querySelectorAll(".cell");
+    const idx = r * 8 + c;
+    if (cells[idx]) cells[idx].classList.add("selected");
+
+    renderBoard();
+  }
+
+  function makeMove(r, c) {
+    if (engine.currentTurn !== PLAYER || engine.gameOver) return;
+    const move = engine.validMoves.find(m => m.to[0] === r && m.to[1] === c);
+    if (!move) return;
+
+    const result = engine.executeMove(move);
+    lastMove = { from: move.from, to: move.to };
+    engine.selectedPiece = null;
+    engine.validMoves = [];
+
+    renderBoard();
+
+    if (engine.gameOver) {
+      endGame();
+      return;
+    }
+
+    if (result.multiJump) {
+      // Player continues multi-jump
+      renderBoard();
+      return;
+    }
+
+    // AI turn
+    if (engine.currentTurn === AI) {
+      setTimeout(doAITurn, 400);
+    }
+  }
+
+  function doAITurn() {
+    if (engine.gameOver) return;
+
+    const move = engine.getAIMove();
+    if (!move) {
+      engine.gameOver = true;
+      engine.winner = PLAYER;
+      endGame();
+      return;
+    }
+
+    const result = engine.executeMove(move);
+    lastMove = { from: move.from, to: move.to };
+    renderBoard();
+
+    if (engine.gameOver) {
+      endGame();
+      return;
+    }
+
+    if (result.multiJump) {
+      // AI continues multi-jump
+      setTimeout(doAITurn, 300);
+      return;
+    }
+
+    renderBoard();
+  }
+
+  // ── STATS BAR ──────────────────────────────────────────────
+  function updateStatsBar() {
+    const el = document.getElementById("stats-bar");
+    if (!el) return;
+    el.innerHTML = `
+      <div class="stat-chip">
+        <span class="label">You</span>
+        <span class="value blue">${engine.getPieceCount(PLAYER)}</span>
+      </div>
+      <div class="stat-chip">
+        <span class="label">AI</span>
+        <span class="value red">${engine.getPieceCount(AI)}</span>
+      </div>
+      <div class="stat-chip">
+        <span class="label">XP</span>
+        <span class="value">${progress.xp}</span>
+      </div>
+      <div class="stat-chip">
+        <span class="label">Correct</span>
+        <span class="value green">${gameQuestionsCorrect}</span>
+      </div>
+      <div class="stat-chip">
+        <span class="label">Streak</span>
+        <span class="value">${questionEngine ? questionEngine.stats.streak : 0}</span>
+      </div>
+    `;
+  }
+
+  function updateTurnIndicator() {
+    const el = document.getElementById("turn-indicator");
+    if (!el) return;
+    if (engine.currentTurn === PLAYER) {
+      el.textContent = engine.multiJumpPiece ? "Continue Jump!" : "Your Move";
+      el.className = "turn-indicator player-turn";
+    } else {
+      el.textContent = "AI Thinking...";
+      el.className = "turn-indicator ai-turn";
+    }
+  }
+
+  // ── ABILITIES ──────────────────────────────────────────────
+  function renderAbilities() {
+    const el = document.getElementById("abilities-bar");
+    if (!el) return;
+    el.innerHTML = "";
+
+    for (const [id, ability] of Object.entries(activeAbilities)) {
+      const btn = document.createElement("button");
+      btn.className = "ability-btn";
+      btn.disabled = ability.remaining <= 0 || engine.gameOver;
+      btn.innerHTML = `${ability.icon} ${ability.name} <span class="uses">[${ability.remaining}]</span>`;
+      btn.onclick = () => useAbility(id);
+      el.appendChild(btn);
+    }
+  }
+
+  function useAbility(id) {
+    const ability = activeAbilities[id];
+    if (!ability || ability.remaining <= 0) return;
+
+    switch (id) {
+      case "constitutional_shield":
+        // Passive — used automatically on wrong answer
+        break;
+      case "judicial_review":
+        if (engine.currentTurn === PLAYER && lastMove) {
+          // Can only use right after AI moved
+          // Undo isn't trivial in checkers, so we give AI a "worse" replacement move
+          ability.remaining--;
+          const aiMove = engine.getAIMove();
+          // Just give player an extra move as compensation
+          engine.grantBonusMove();
+          showXPPopup("JUDICIAL REVIEW!");
+          renderBoard();
+        }
+        break;
+      case "executive_order":
+        if (engine.currentTurn === PLAYER) {
+          // King the first non-king player piece found
+          for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+              if (engine.board[r][c] === PLAYER) {
+                engine.forceKing(r, c);
+                ability.remaining--;
+                showXPPopup("EXECUTIVE ORDER!");
+                renderBoard();
+                return;
+              }
+            }
+          }
+        }
+        break;
+    }
+    renderAbilities();
+  }
+
+  // ── QUESTION TIMER ─────────────────────────────────────────
+  function startQuestionTimer() {
+    timeUntilQuestion = questionInterval;
+    timerPaused = false;
+    if (questionTimer) clearInterval(questionTimer);
+    questionTimer = setInterval(() => {
+      if (timerPaused || engine.gameOver) return;
+      timeUntilQuestion--;
+      updateTimerBar();
+      if (timeUntilQuestion <= 0) {
+        triggerQuestion();
+      }
+    }, 1000);
+  }
+
+  function updateTimerBar() {
+    const bar = document.getElementById("timer-bar");
+    if (!bar) return;
+    const pct = (timeUntilQuestion / questionInterval) * 100;
+    bar.style.width = pct + "%";
+    bar.classList.toggle("urgent", pct < 20);
+  }
+
+  function triggerQuestion() {
+    timerPaused = true;
+    const difficulty = Math.min(3, 1 + Math.floor(progress.unlockedNodes.length / 2));
+    const q = questionEngine.getQuestion(difficulty);
+    showQuestionModal(q);
+  }
+
+  // ── QUESTION MODAL ─────────────────────────────────────────
+  function showQuestionModal(question) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "question-overlay";
+
+    const showArticle = hasNode("scholars_insight", progress);
+    const letters = ["A", "B", "C", "D"];
+
+    overlay.innerHTML = `
+      <div class="question-modal">
+        <div class="question-header">
+          <span class="q-label">Constitutional Challenge</span>
+          ${showArticle ? `<span class="q-article">${question.article}</span>` : ""}
+        </div>
+        <div class="question-body">
+          <div class="question-text">${question.question}</div>
+          <div class="choices-list" id="choices-list">
+            ${question.choices.map((choice, i) => `
+              <button class="choice-btn" data-index="${i}">
+                <span class="choice-letter">${letters[i]}</span>
+                <span>${choice}</span>
+              </button>
+            `).join("")}
+          </div>
+          <div id="result-area"></div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Bind choices
+    overlay.querySelectorAll(".choice-btn").forEach(btn => {
+      btn.onclick = () => handleAnswer(question, parseInt(btn.dataset.index), overlay);
+    });
+  }
+
+  function handleAnswer(question, chosenIndex, overlay) {
+    const isCorrect = questionEngine.recordAnswer(question, chosenIndex);
+    const buttons = overlay.querySelectorAll(".choice-btn");
+    buttons.forEach(btn => {
+      btn.classList.add("answered");
+      btn.onclick = null;
+      const idx = parseInt(btn.dataset.index);
+      if (idx === question.correct) btn.classList.add("correct", "revealed-correct");
+      if (idx === chosenIndex && !isCorrect) btn.classList.add("wrong");
+    });
+
+    const resultArea = overlay.querySelector("#result-area");
+    let effectText = "";
+    let xpGained = 0;
+
+    if (isCorrect) {
+      xpGained = XP_CORRECT_ANSWER;
+      if (questionEngine.stats.streak > 2) {
+        xpGained += XP_CORRECT_STREAK_BONUS * (questionEngine.stats.streak - 2);
+      }
+      gameQuestionsCorrect++;
+
+      // Determine reward
+      const rewards = [];
+      if (engine.capturedByAI > 0) {
+        rewards.push("recover");
+      }
+      rewards.push("bonus");
+
+      const reward = rewards[Math.floor(Math.random() * rewards.length)];
+      if (reward === "recover" && engine.capturedByAI > 0) {
+        engine.recoverPiece();
+        effectText = `+${xpGained} XP ◆ Recovered a captured piece!`;
+      } else {
+        engine.grantBonusMove();
+        effectText = `+${xpGained} XP ◆ Bonus move granted!`;
+      }
+
+      addXP(xpGained, progress);
+      gameXPEarned += xpGained;
+    } else {
+      gameQuestionsWrong++;
+
+      // Check for shield
+      if (activeAbilities.constitutional_shield && activeAbilities.constitutional_shield.remaining > 0) {
+        activeAbilities.constitutional_shield.remaining--;
+        effectText = "Constitutional Shield activated — penalty blocked!";
+      } else if (activeAbilities.amendment_power && activeAbilities.amendment_power.remaining > 0) {
+        // Offer amendment power
+        effectText = "Wrong answer. The AI gains a bonus move.";
+        // Still apply penalty — amendment power would need to be used proactively
+        setTimeout(() => {
+          if (!engine.gameOver) {
+            const bonusMove = engine.grantAIBonusMove();
+            if (bonusMove) {
+              lastMove = { from: bonusMove.from, to: bonusMove.to };
+              const boardEl = document.getElementById("board");
+              if (boardEl) boardEl.classList.add("shake");
+              setTimeout(() => boardEl && boardEl.classList.remove("shake"), 400);
+            }
+            renderBoard();
+          }
+        }, 1500);
+      } else {
+        effectText = "The AI gains a bonus move!";
+        setTimeout(() => {
+          if (!engine.gameOver) {
+            const bonusMove = engine.grantAIBonusMove();
+            if (bonusMove) {
+              lastMove = { from: bonusMove.from, to: bonusMove.to };
+              const boardEl = document.getElementById("board");
+              if (boardEl) boardEl.classList.add("shake");
+              setTimeout(() => boardEl && boardEl.classList.remove("shake"), 400);
+            }
+            renderBoard();
+          }
+        }, 1500);
+      }
+    }
+
+    resultArea.innerHTML = `
+      <div class="result-display ${isCorrect ? "correct-result" : "wrong-result"}">
+        <div class="result-label">${isCorrect ? "Correct!" : "Incorrect"}</div>
+        <div class="result-explanation">${question.explanation}</div>
+        <div class="result-effect">${effectText}</div>
+        <button class="continue-btn" id="btn-continue">Continue</button>
+      </div>
+    `;
+
+    overlay.querySelector("#btn-continue").onclick = () => {
+      overlay.remove();
+      timerPaused = false;
+      timeUntilQuestion = questionInterval;
+      renderBoard();
+      updateStatsBar();
+      if (engine.gameOver) endGame();
+    };
+  }
+
+  // ── XP POPUP ───────────────────────────────────────────────
+  function showXPPopup(text) {
+    const popup = document.createElement("div");
+    popup.className = "xp-popup";
+    popup.textContent = text;
+    document.body.appendChild(popup);
+    setTimeout(() => popup.remove(), 1600);
+  }
+
+  // ── GAME OVER ──────────────────────────────────────────────
+  function endGame() {
+    if (questionTimer) clearInterval(questionTimer);
+
+    const won = engine.winner === PLAYER;
+    let bonusXP = won ? XP_WIN_GAME : XP_LOSE_GAME;
+    if (gameQuestionsWrong === 0 && gameQuestionsCorrect > 0) bonusXP += XP_PERFECT_GAME;
+    addXP(bonusXP, progress);
+    gameXPEarned += bonusXP;
+
+    progress.gamesPlayed++;
+    if (won) progress.gamesWon++;
+    if (questionEngine.stats.bestStreak > progress.bestStreak) {
+      progress.bestStreak = questionEngine.stats.bestStreak;
+    }
+    progress.totalCorrect += gameQuestionsCorrect;
+    progress.totalWrong += gameQuestionsWrong;
+
+    // Update article mastery
+    for (const [article, stats] of Object.entries(questionEngine.stats.byArticle)) {
+      if (!progress.articleMastery[article]) {
+        progress.articleMastery[article] = { correct: 0, wrong: 0 };
+      }
+      progress.articleMastery[article].correct += stats.correct;
+      progress.articleMastery[article].wrong += stats.wrong;
+    }
+
+    saveProgress(progress);
+
+    // Show game over modal
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="question-modal">
+        <div class="game-over-modal">
+          <h2>${won ? "Victory!" : "Defeat"}</h2>
+          <div class="result-text">${won
+            ? "The Constitution prevails! Your knowledge carried the day."
+            : "The opposition was too strong this time. Study the Articles and return."
+          }</div>
+          <div class="game-over-stats">
+            <div class="game-over-stat">
+              <div class="go-label">XP Earned</div>
+              <div class="go-value">+${gameXPEarned}</div>
+            </div>
+            <div class="game-over-stat">
+              <div class="go-label">Questions</div>
+              <div class="go-value">${gameQuestionsCorrect}/${gameQuestionsCorrect + gameQuestionsWrong}</div>
+            </div>
+            <div class="game-over-stat">
+              <div class="go-label">Best Streak</div>
+              <div class="go-value">${questionEngine.stats.bestStreak}</div>
+            </div>
+            <div class="game-over-stat">
+              <div class="go-label">AI Level</div>
+              <div class="go-value">${engine.aiDepth}</div>
+            </div>
+          </div>
+          <button class="play-again-btn" id="btn-play-again">Play Again</button>
+          <br><br>
+          <button class="menu-btn secondary" id="btn-back-menu">Main Menu</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.querySelector("#btn-play-again").onclick = () => {
+      overlay.remove();
+      startGame();
+    };
+    overlay.querySelector("#btn-back-menu").onclick = () => {
+      overlay.remove();
+      renderMenu();
+      showScreen("menu");
+    };
+  }
+
+  // ── SIDEBAR ────────────────────────────────────────────────
+  function renderSidebar() {
+    const el = document.getElementById("sidebar");
+    if (!el) return;
+
+    el.innerHTML = `
+      <div class="panel">
+        <div class="panel-header">Scholar's Progress</div>
+        <div class="panel-body">
+          <div class="xp-display">
+            <div>
+              <div class="xp-amount">${progress.xp}</div>
+              <div class="xp-label">Available XP</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="tab-nav">
+          <button class="tab-btn active" data-tab="mini-tree">Skill Tree</button>
+          <button class="tab-btn" data-tab="mini-stats">Session</button>
+        </div>
+        <div class="panel-body" id="sidebar-tab-content"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">How to Play</div>
+        <div class="panel-body" style="font-size:0.8rem; color:var(--text-secondary); line-height:1.5;">
+          Move your <span style="color:var(--neon-blue)">teal pieces</span> diagonally forward.
+          Jump over <span style="color:var(--neon-red)">red pieces</span> to capture them.
+          Reach the far side to become a King.
+          <br><br>
+          Every ~50 seconds, a <span style="color:var(--neon-gold)">Constitutional Challenge</span> appears.
+          Correct = bonus move or recovered piece.
+          Wrong = the AI gets a bonus move.
+        </div>
+      </div>
+    `;
+
+    // Tab switching
+    el.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.onclick = () => {
+        el.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        renderSidebarTab(btn.dataset.tab);
+      };
+    });
+
+    renderSidebarTab("mini-tree");
+  }
+
+  function renderSidebarTab(tab) {
+    const el = document.getElementById("sidebar-tab-content");
+    if (!el) return;
+
+    if (tab === "mini-tree") {
+      const rows = [[], [], [], []];
+      SKILL_NODES.forEach(n => rows[n.row].push(n));
+
+      el.innerHTML = `
+        <div class="skill-tree-grid">
+          ${rows.map(row => `
+            <div class="skill-row">
+              ${row.map(node => {
+                const unlocked = progress.unlockedNodes.includes(node.id);
+                const available = canUnlock(node.id, progress);
+                const cls = unlocked ? "unlocked" : available ? "available" : "";
+                return `
+                  <div class="skill-node ${cls}" data-node="${node.id}" title="${node.description}">
+                    <span class="node-icon">${node.icon}</span>
+                    <span class="node-name">${node.name}</span>
+                    <span class="node-cost">${unlocked ? "UNLOCKED" : node.cost + " XP"}</span>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          `).join("")}
+        </div>
+      `;
+
+      // Bind unlock clicks
+      el.querySelectorAll(".skill-node.available").forEach(nodeEl => {
+        nodeEl.onclick = () => {
+          const nodeId = nodeEl.dataset.node;
+          const node = SKILL_NODES.find(n => n.id === nodeId);
+          if (confirm(`Unlock "${node.name}" for ${node.cost} XP?\n\n${node.description}`)) {
+            if (unlockNode(nodeId, progress)) {
+              activeAbilities = getActiveAbilities(progress);
+              engine.setDifficulty(progress.unlockedNodes.length);
+              showXPPopup(`${node.icon} UNLOCKED!`);
+              renderSidebar();
+              updateStatsBar();
+              renderAbilities();
+            }
+          }
+        };
+      });
+    } else {
+      el.innerHTML = `
+        <div style="font-family:var(--font-mono); font-size:0.7rem; color:var(--text-secondary);">
+          <div style="margin-bottom:8px;">
+            <span style="color:var(--neon-green)">Correct:</span> ${gameQuestionsCorrect}
+            &nbsp;&nbsp;
+            <span style="color:var(--neon-red)">Wrong:</span> ${gameQuestionsWrong}
+          </div>
+          <div style="margin-bottom:8px;">
+            <span style="color:var(--neon-gold)">XP This Game:</span> +${gameXPEarned}
+          </div>
+          <div style="margin-bottom:8px;">
+            <span>Accuracy:</span> ${questionEngine ? questionEngine.getAccuracy() : 0}%
+          </div>
+          <div>
+            <span>AI Depth:</span> ${engine ? engine.aiDepth : 3}
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // ── SKILL TREE SCREEN ──────────────────────────────────────
+  function renderSkillTree() {
+    const el = document.getElementById("screen-tree");
+    const rows = [[], [], [], []];
+    SKILL_NODES.forEach(n => rows[n.row].push(n));
+
+    el.innerHTML = `
+      <div class="app-container">
+        <div class="app-header">
+          <h1>Skill Tree</h1>
+          <div class="subtitle">Spend XP to Unlock Abilities</div>
+        </div>
+        <div style="text-align:center; margin-bottom:20px;">
+          <div class="xp-display" style="justify-content:center;">
+            <div>
+              <div class="xp-amount" style="font-size:1.5rem;">${progress.xp}</div>
+              <div class="xp-label">Available XP</div>
+            </div>
+            <div style="margin-left:20px;">
+              <div class="xp-amount" style="font-size:1.5rem; color:var(--text-secondary);">${progress.totalXP}</div>
+              <div class="xp-label">Total Earned</div>
+            </div>
+          </div>
+        </div>
+        <div class="skill-tree-grid" style="gap:16px;">
+          ${rows.map(row => `
+            <div class="skill-row" style="gap:16px;">
+              ${row.map(node => {
+                const unlocked = progress.unlockedNodes.includes(node.id);
+                const available = canUnlock(node.id, progress);
+                const cls = unlocked ? "unlocked" : available ? "available" : "";
+                return `
+                  <div class="skill-node ${cls}" data-node="${node.id}" style="width:120px; padding:12px 8px;">
+                    <span class="node-icon" style="font-size:1.8rem;">${node.icon}</span>
+                    <span class="node-name" style="font-size:0.65rem;">${node.name}</span>
+                    <span class="node-cost">${unlocked ? "UNLOCKED" : node.cost + " XP"}</span>
+                    <div style="font-size:0.6rem; color:var(--text-dim); margin-top:4px; line-height:1.2;">${node.description}</div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          `).join("")}
+        </div>
+        <div style="text-align:center; margin-top:24px;">
+          <button class="menu-btn secondary" id="btn-tree-back">Back to Menu</button>
+        </div>
+      </div>
+    `;
+
+    el.querySelector("#btn-tree-back").onclick = () => { renderMenu(); showScreen("menu"); };
+
+    el.querySelectorAll(".skill-node.available").forEach(nodeEl => {
+      nodeEl.onclick = () => {
+        const nodeId = nodeEl.dataset.node;
+        const node = SKILL_NODES.find(n => n.id === nodeId);
+        if (confirm(`Unlock "${node.name}" for ${node.cost} XP?\n\n${node.description}`)) {
+          if (unlockNode(nodeId, progress)) {
+            showXPPopup(`${node.icon} UNLOCKED!`);
+            renderSkillTree();
+          }
+        }
+      };
+    });
+  }
+
+  // ── MASTERY SCREEN ─────────────────────────────────────────
+  function renderMastery() {
+    const el = document.getElementById("screen-mastery");
+    const articles = ["Preamble", "Article I", "Article II", "Article III", "Article IV", "Article V", "Article VI", "Article VII"];
+
+    el.innerHTML = `
+      <div class="app-container">
+        <div class="app-header">
+          <h1>Article Mastery</h1>
+          <div class="subtitle">Track Your Knowledge by Section</div>
+        </div>
+        <div class="panel" style="max-width:600px; margin:0 auto;">
+          <div class="panel-header">Mastery Breakdown</div>
+          <div class="panel-body">
+            <div class="mastery-list">
+              ${articles.map(article => {
+                const data = progress.articleMastery[article] || { correct: 0, wrong: 0 };
+                const total = data.correct + data.wrong;
+                const pct = total === 0 ? 0 : Math.round((data.correct / total) * 100);
+                const cls = pct >= 70 ? "high" : pct >= 40 ? "mid" : "low";
+                return `
+                  <div class="mastery-row">
+                    <span class="mastery-label">${article}</span>
+                    <div class="mastery-bar">
+                      <div class="mastery-fill ${cls}" style="width:${pct}%"></div>
+                    </div>
+                    <span class="mastery-pct">${total === 0 ? "--" : pct + "%"}</span>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+            <div style="margin-top:16px; font-family:var(--font-mono); font-size:0.7rem; color:var(--text-secondary); text-align:center;">
+              Total: ${progress.totalCorrect} correct / ${progress.totalCorrect + progress.totalWrong} attempted
+              (${progress.totalCorrect + progress.totalWrong > 0 ? Math.round((progress.totalCorrect / (progress.totalCorrect + progress.totalWrong)) * 100) : 0}%)
+            </div>
+          </div>
+        </div>
+        <div style="text-align:center; margin-top:24px;">
+          <button class="menu-btn secondary" id="btn-mastery-back">Back to Menu</button>
+        </div>
+      </div>
+    `;
+
+    el.querySelector("#btn-mastery-back").onclick = () => { renderMenu(); showScreen("menu"); };
+  }
+
+  // ── BOOT ───────────────────────────────────────────────────
+  document.addEventListener("DOMContentLoaded", init);
+})();
